@@ -25,7 +25,7 @@ For training on COCO, run:
 ```
 OMP_NUM_THREADS=1 python tools/train_net.py \
     --config-file configs/SOLOv2/R50_3x.yaml \
-    --num-gpus 8 \
+    --num-gpus 1 \
     OUTPUT_DIR training_dir/SOLOv2_R50_3x
 ```
 
@@ -34,7 +34,7 @@ For evaluation on COCO, run:
 OMP_NUM_THREADS=1 python tools/train_net.py \
     --config-file configs/SOLOv2/R50_3x.yaml \
     --eval-only \
-    --num-gpus 8 \
+    --num-gpus 1 \
     OUTPUT_DIR training_dir/SOLOv2_R50_3x \
     MODEL.WEIGHTS training_dir/SOLOv2_R50_3x/model_final.pth
 ```
