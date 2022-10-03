@@ -3,7 +3,7 @@ import os
 from detectron2.data.datasets.register_coco import register_coco_instances
 from detectron2.data.datasets.builtin_meta import _get_builtin_metadata
 from detectron2.data import MetadataCatalog, DatasetCatalog
-from .datasets.cihp import get_cihp_dicts
+from .datasets.cihp import get_cihp_dicts, CIHPDataset
 
 from .datasets.text import register_text_instances
 
@@ -65,6 +65,9 @@ root = os.environ.get('DETECTION2_DATASETS', 'datasets')
 DatasetCatalog.register("CIHP_train", lambda: get_cihp_dicts(root, train=True))
 DatasetCatalog.register("CIHP_val", lambda: get_cihp_dicts(root, train=False))
 
+DatasetCatalog.register("CIHP_train_v2", lambda: CIHPDataset(root, train=True))
+DatasetCatalog.register("CIHP_val_v2", lambda: CIHPDataset(root, train=False))
+
 DatasetCatalog.register("CIHP_train_person", lambda: get_cihp_dicts(root, train=True, person_only=True))
 DatasetCatalog.register("CIHP_val_person", lambda: get_cihp_dicts(root, train=False, person_only=True))
 
@@ -74,13 +77,12 @@ thing_classes = ['Person', 'Hat', 'Hair', 'Glove', 'Sunglasses', 'UpperClothes',
 stuff_classes = ['background', 'Hat', 'Hair', 'Glove', 'Sunglasses', 'UpperClothes', 'Dress', 'Coat', 'Socks', 'Pants',
                  'Torso-skin',
                  'Scarf', 'Skirt', 'Face', 'Left-arm', 'Right-arm', 'Left-leg', 'Right-leg', 'Left-shoe', 'Right-shoe']
-MetadataCatalog.get('CIHP_train').set(thing_classes=thing_classes, stuff_classes=stuff_classes,
-                                      evaluator_type="coco")
+MetadataCatalog.get('CIHP_train').set(thing_classes=thing_classes, stuff_classes=stuff_classes, evaluator_type="coco")
 MetadataCatalog.get('CIHP_val').set(thing_classes=thing_classes, stuff_classes=stuff_classes, evaluator_type="coco")
-
+MetadataCatalog.get('CIHP_train_v2').set(thing_classes=thing_classes[1:], stuff_classes=stuff_classes, evaluator_type="coco")
+MetadataCatalog.get('CIHP_val_v2').set(thing_classes=thing_classes[1:], stuff_classes=stuff_classes, evaluator_type="coco")
 MetadataCatalog.get('CIHP_train_person').set(thing_classes=['Person'], evaluator_type="coco")
 MetadataCatalog.get('CIHP_val_person').set(thing_classes=['Person'], evaluator_type="coco")
-
 MetadataCatalog.get('CIHP_train_person').set(thing_classes=['Person'], evaluator_type="coco")
 
 register_all_coco()

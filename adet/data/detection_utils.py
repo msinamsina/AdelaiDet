@@ -52,7 +52,6 @@ def transform_beziers_annotations(beziers, transforms):
 
 def annotations_to_instances(annos, image_size, mask_format="polygon"):
     instance = d2_anno_to_inst(annos, image_size, mask_format)
-
     if not annos:
         return instance
 
@@ -64,7 +63,9 @@ def annotations_to_instances(annos, image_size, mask_format="polygon"):
     if "rec" in annos[0]:
         text = [obj.get("rec", []) for obj in annos]
         instance.text = torch.as_tensor(text, dtype=torch.int32)
-
+    if "parent_id" in annos[0]:
+        parent_id = [obj.get("parent_id", -1) for obj in annos]
+        instance.parent_id = torch.as_tensor(parent_id, dtype=torch.int32)
     return instance
 
 

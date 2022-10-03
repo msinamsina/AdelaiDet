@@ -6,6 +6,83 @@ import cv2
 import numpy as np
 
 
+class CIHPDataset:
+
+    def __init__(self, root, train=False):
+        self.train = train
+
+        if train:
+            anno = os.path.join(root, 'CIHP/Training/train_id.txt')
+            self.root = os.path.join(root, 'CIHP/Training/')
+        else:
+            anno = os.path.join(root, 'CIHP/Validation/val_id.txt')
+            self.root = os.path.join(root, 'CIHP/Validation/')
+
+        with open(anno, 'r') as f:
+            self.anno_ids = f.read().strip().split('\n')
+            try:
+                self.anno_ids.remove('0035374')
+            except:
+                pass
+    def __getitem__(self, idx):
+        id = self.anno_ids[idx]
+        record = {}
+        filename = os.path.join(self.root, 'Images', id + '.jpg')
+        print(f'file name: {filename}')
+        height, width = cv2.imread(filename).shape[:2]
+
+        record["file_name"] = filename
+        record["image_id"] = idx
+        record["height"] = height
+        record["width"] = width
+        record["annotations"] = self.create_annotations(id)
+        record['sem_seg_file_name'] = os.path.join(self.root, 'Category_ids', id + '.png')
+        return record
+
+    def create_annotations(self, id):
+        objs = []
+
+        inst_filename = os.path.join(self.root, 'Instance_ids', id + '.png')
+        inst_img = cv2.imread(inst_filename, 0)
+        inst_img[inst_img == 255] = 0
+        instances = np.unique(inst_img)
+        for inst in instances:
+            if inst == 0:
+                continue
+            mask = inst_img.copy()
+            mask[mask != inst] = 0
+            mask[mask == inst] = 1
+
+            polygons = Mask(mask).polygons()
+            xy = polygons.bbox()
+
+            poly = polygons.segmentation
+
+            # filter out small polygons
+            true_polygons_list = []
+            for p in poly:
+                if len(p) > 5:
+                    true_polygons_list.append(p)
+
+            if len(true_polygons_list) < 1:
+                continue
+
+            obj = {
+                "bbox": list(xy),
+                "bbox_mode": BoxMode.XYXY_ABS,
+                "segmentation": true_polygons_list,
+                "category_id": (inst % 20) - 1,
+                "parent_id": (inst // 20),
+            }
+            if obj['category_id'] < 0:
+                print(obj)
+                print(instances)
+            objs.append(obj)
+        return objs
+    def __len__(self):
+        return len(self.anno_ids)
+
+
 def get_cihp_dicts(root, train=False, person_only=False):
     """
     Args:
@@ -83,7 +160,7 @@ def get_cihp_dicts(root, train=False, person_only=False):
                         "bbox_mode": BoxMode.XYXY_ABS,
                         "segmentation": true_polygons_list,
                         "category_id": (inst % 20),
-                        "person_id": (inst // 20),
+                        "parent_id": (inst // 20),
                     }
                     if obj['category_id'] < 0:
                         print(obj)
