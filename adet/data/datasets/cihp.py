@@ -4,9 +4,9 @@ from imantics import Polygons, Mask
 import pickle
 import cv2
 import numpy as np
+from torch.utils.data import Dataset
 
-
-class CIHPDataset:
+class CIHPDataset(Dataset):
 
     def __init__(self, root, train=False):
         self.train = train
@@ -24,11 +24,15 @@ class CIHPDataset:
                 self.anno_ids.remove('0035374')
             except:
                 pass
+
+    def __call__(self, *args, **kwargs):
+        return self
+
     def __getitem__(self, idx):
         id = self.anno_ids[idx]
         record = {}
         filename = os.path.join(self.root, 'Images', id + '.jpg')
-        print(f'file name: {filename}')
+        # print(f'file name: {filename}')
         height, width = cv2.imread(filename).shape[:2]
 
         record["file_name"] = filename
@@ -79,8 +83,13 @@ class CIHPDataset:
                 print(instances)
             objs.append(obj)
         return objs
+
     def __len__(self):
         return len(self.anno_ids)
+
+    def get_dicts(self):
+        return [self.__getitem__(i) for i in range(len(self))]
+
 
 
 def get_cihp_dicts(root, train=False, person_only=False):

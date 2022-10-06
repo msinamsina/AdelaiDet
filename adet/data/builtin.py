@@ -65,8 +65,8 @@ root = os.environ.get('DETECTION2_DATASETS', 'datasets')
 DatasetCatalog.register("CIHP_train", lambda: get_cihp_dicts(root, train=True))
 DatasetCatalog.register("CIHP_val", lambda: get_cihp_dicts(root, train=False))
 
-DatasetCatalog.register("CIHP_train_v2", lambda: CIHPDataset(root, train=True))
-DatasetCatalog.register("CIHP_val_v2", lambda: CIHPDataset(root, train=False))
+DatasetCatalog.register("CIHP_train_v2", CIHPDataset(root, train=True))
+DatasetCatalog.register("CIHP_val_v2", CIHPDataset(root, train=False))
 
 DatasetCatalog.register("CIHP_train_person", lambda: get_cihp_dicts(root, train=True, person_only=True))
 DatasetCatalog.register("CIHP_val_person", lambda: get_cihp_dicts(root, train=False, person_only=True))
