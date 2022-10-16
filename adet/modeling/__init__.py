@@ -9,6 +9,8 @@ from .MEInst import MEInst
 from .condinst import condinst
 from .solov2 import SOLOv2
 from .fcpose import FCPose
+from .polo import POLO
 
 _EXCLUDE = {"torch", "ShapeSpec"}
 __all__ = [k for k in globals().keys() if k not in _EXCLUDE and not k.startswith("_")]
+SOLOv2
