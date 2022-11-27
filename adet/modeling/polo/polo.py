@@ -25,7 +25,7 @@ __all__ = ["POLO"]
 @META_ARCH_REGISTRY.register()
 class POLO(nn.Module):
     """
-    SOLOv2 model. Creates FPN backbone, instance branch for kernels and categories prediction,
+    POLO model. Creates FPN backbone, instance branch for kernels and categories prediction,
     mask branch for unified mask features.
     Calculates and applies proper losses to class and masks.
     """
@@ -36,35 +36,35 @@ class POLO(nn.Module):
         # get the device of the model
         self.device = torch.device(cfg.MODEL.DEVICE)
 
-        self.scale_ranges = cfg.MODEL.SOLOV2.FPN_SCALE_RANGES
-        self.strides = cfg.MODEL.SOLOV2.FPN_INSTANCE_STRIDES
-        self.sigma = cfg.MODEL.SOLOV2.SIGMA
+        self.scale_ranges = cfg.MODEL.POLO.FPN_SCALE_RANGES
+        self.strides = cfg.MODEL.POLO.FPN_INSTANCE_STRIDES
+        self.sigma = cfg.MODEL.POLO.SIGMA
         # Instance parameters.
-        self.num_classes = cfg.MODEL.SOLOV2.NUM_CLASSES
-        self.num_kernels = cfg.MODEL.SOLOV2.NUM_KERNELS
-        self.num_grids = cfg.MODEL.SOLOV2.NUM_GRIDS
+        self.num_classes = cfg.MODEL.POLO.NUM_CLASSES
+        self.num_kernels = cfg.MODEL.POLO.NUM_KERNELS
+        self.num_grids = cfg.MODEL.POLO.NUM_GRIDS
 
-        self.instance_in_features = cfg.MODEL.SOLOV2.INSTANCE_IN_FEATURES
-        self.instance_strides = cfg.MODEL.SOLOV2.FPN_INSTANCE_STRIDES
-        self.instance_in_channels = cfg.MODEL.SOLOV2.INSTANCE_IN_CHANNELS  # = fpn.
-        self.instance_channels = cfg.MODEL.SOLOV2.INSTANCE_CHANNELS
+        self.instance_in_features = cfg.MODEL.POLO.INSTANCE_IN_FEATURES
+        self.instance_strides = cfg.MODEL.POLO.FPN_INSTANCE_STRIDES
+        self.instance_in_channels = cfg.MODEL.POLO.INSTANCE_IN_CHANNELS  # = fpn.
+        self.instance_channels = cfg.MODEL.POLO.INSTANCE_CHANNELS
 
         # Mask parameters.
         self.mask_on = cfg.MODEL.MASK_ON
-        self.mask_in_features = cfg.MODEL.SOLOV2.MASK_IN_FEATURES
-        self.mask_in_channels = cfg.MODEL.SOLOV2.MASK_IN_CHANNELS
-        self.mask_channels = cfg.MODEL.SOLOV2.MASK_CHANNELS
-        self.num_masks = cfg.MODEL.SOLOV2.NUM_MASKS
+        self.mask_in_features = cfg.MODEL.POLO.MASK_IN_FEATURES
+        self.mask_in_channels = cfg.MODEL.POLO.MASK_IN_CHANNELS
+        self.mask_channels = cfg.MODEL.POLO.MASK_CHANNELS
+        self.num_masks = cfg.MODEL.POLO.NUM_MASKS
 
         # Inference parameters.
-        self.max_before_nms = cfg.MODEL.SOLOV2.NMS_PRE
-        self.score_threshold = cfg.MODEL.SOLOV2.SCORE_THR
-        self.update_threshold = cfg.MODEL.SOLOV2.UPDATE_THR
-        self.mask_threshold = cfg.MODEL.SOLOV2.MASK_THR
-        self.max_per_img = cfg.MODEL.SOLOV2.MAX_PER_IMG
-        self.nms_kernel = cfg.MODEL.SOLOV2.NMS_KERNEL
-        self.nms_sigma = cfg.MODEL.SOLOV2.NMS_SIGMA
-        self.nms_type = cfg.MODEL.SOLOV2.NMS_TYPE
+        self.max_before_nms = cfg.MODEL.POLO.NMS_PRE
+        self.score_threshold = cfg.MODEL.POLO.SCORE_THR
+        self.update_threshold = cfg.MODEL.POLO.UPDATE_THR
+        self.mask_threshold = cfg.MODEL.POLO.MASK_THR
+        self.max_per_img = cfg.MODEL.POLO.MAX_PER_IMG
+        self.nms_kernel = cfg.MODEL.POLO.NMS_KERNEL
+        self.nms_sigma = cfg.MODEL.POLO.NMS_SIGMA
+        self.nms_type = cfg.MODEL.POLO.NMS_TYPE
 
         # build the backbone.
         self.backbone = build_backbone(cfg)
@@ -79,10 +79,10 @@ class POLO(nn.Module):
         self.mask_head = POLOMaskHead(cfg, mask_shapes)
 
         # loss
-        self.ins_loss_weight = cfg.MODEL.SOLOV2.LOSS.DICE_WEIGHT
-        self.focal_loss_alpha = cfg.MODEL.SOLOV2.LOSS.FOCAL_ALPHA
-        self.focal_loss_gamma = cfg.MODEL.SOLOV2.LOSS.FOCAL_GAMMA
-        self.focal_loss_weight = cfg.MODEL.SOLOV2.LOSS.FOCAL_WEIGHT
+        self.ins_loss_weight = cfg.MODEL.POLO.LOSS.DICE_WEIGHT
+        self.focal_loss_alpha = cfg.MODEL.POLO.LOSS.FOCAL_ALPHA
+        self.focal_loss_gamma = cfg.MODEL.POLO.LOSS.FOCAL_GAMMA
+        self.focal_loss_weight = cfg.MODEL.POLO.LOSS.FOCAL_WEIGHT
 
         # image transform
         pixel_mean = torch.Tensor(cfg.MODEL.PIXEL_MEAN).to(self.device).view(3, 1, 1)
@@ -579,38 +579,38 @@ class POLO(nn.Module):
 class POLOInsHead(nn.Module):
     def __init__(self, cfg, input_shape: List[ShapeSpec]):
         """
-        SOLOv2 Instance Head.
+        POLO Instance Head.
         """
         super().__init__()
         # fmt: off
-        self.num_classes = cfg.MODEL.SOLOV2.NUM_CLASSES
-        self.num_kernels = cfg.MODEL.SOLOV2.NUM_KERNELS
-        self.num_grids = cfg.MODEL.SOLOV2.NUM_GRIDS
-        self.instance_in_features = cfg.MODEL.SOLOV2.INSTANCE_IN_FEATURES
-        self.instance_strides = cfg.MODEL.SOLOV2.FPN_INSTANCE_STRIDES
-        self.instance_in_channels = cfg.MODEL.SOLOV2.INSTANCE_IN_CHANNELS  # = fpn.
-        self.instance_channels = cfg.MODEL.SOLOV2.INSTANCE_CHANNELS
+        self.num_classes = cfg.MODEL.POLO.NUM_CLASSES
+        self.num_kernels = cfg.MODEL.POLO.NUM_KERNELS
+        self.num_grids = cfg.MODEL.POLO.NUM_GRIDS
+        self.instance_in_features = cfg.MODEL.POLO.INSTANCE_IN_FEATURES
+        self.instance_strides = cfg.MODEL.POLO.FPN_INSTANCE_STRIDES
+        self.instance_in_channels = cfg.MODEL.POLO.INSTANCE_IN_CHANNELS  # = fpn.
+        self.instance_channels = cfg.MODEL.POLO.INSTANCE_CHANNELS
         # Convolutions to use in the towers
-        self.type_dcn = cfg.MODEL.SOLOV2.TYPE_DCN
+        self.type_dcn = cfg.MODEL.POLO.TYPE_DCN
         self.num_levels = len(self.instance_in_features)
         assert self.num_levels == len(self.instance_strides), \
             print("Strides should match the features.")
         # fmt: on
 
-        head_configs = {"cate": (cfg.MODEL.SOLOV2.NUM_INSTANCE_CONVS,
-                                 cfg.MODEL.SOLOV2.USE_DCN_IN_INSTANCE,
+        head_configs = {"cate": (cfg.MODEL.POLO.NUM_INSTANCE_CONVS,
+                                 cfg.MODEL.POLO.USE_DCN_IN_INSTANCE,
                                  False),
-                        "kernel": (cfg.MODEL.SOLOV2.NUM_INSTANCE_CONVS,
-                                   cfg.MODEL.SOLOV2.USE_DCN_IN_INSTANCE,
-                                   cfg.MODEL.SOLOV2.USE_COORD_CONV)
+                        "kernel": (cfg.MODEL.POLO.NUM_INSTANCE_CONVS,
+                                   cfg.MODEL.POLO.USE_DCN_IN_INSTANCE,
+                                   cfg.MODEL.POLO.USE_COORD_CONV)
                         }
 
-        norm = None if cfg.MODEL.SOLOV2.NORM == "none" else cfg.MODEL.SOLOV2.NORM
+        norm = None if cfg.MODEL.POLO.NORM == "none" else cfg.MODEL.POLO.NORM
         in_channels = [s.channels for s in input_shape]
         assert len(set(in_channels)) == 1, \
             print("Each level must have the same channel!")
         in_channels = in_channels[0]
-        assert in_channels == cfg.MODEL.SOLOV2.INSTANCE_IN_CHANNELS, \
+        assert in_channels == cfg.MODEL.POLO.INSTANCE_IN_CHANNELS, \
             print("In channels should equal to tower in channels!")
 
         for head in head_configs:
@@ -657,7 +657,7 @@ class POLOInsHead(nn.Module):
                         nn.init.constant_(l.bias, 0)
 
         # initialize the bias for focal loss
-        prior_prob = cfg.MODEL.SOLOV2.PRIOR_PROB
+        prior_prob = cfg.MODEL.POLO.PRIOR_PROB
         bias_value = -math.log((1 - prior_prob) / prior_prob)
         torch.nn.init.constant_(self.cate_pred.bias, bias_value)
 
@@ -703,20 +703,20 @@ class POLOInsHead(nn.Module):
 class POLOMaskHead(nn.Module):
     def __init__(self, cfg, input_shape: List[ShapeSpec]):
         """
-        SOLOv2 Mask Head.
+        POLO Mask Head.
         """
         super().__init__()
         # fmt: off
         self.mask_on = cfg.MODEL.MASK_ON
-        self.num_masks = cfg.MODEL.SOLOV2.NUM_MASKS
-        self.mask_in_features = cfg.MODEL.SOLOV2.MASK_IN_FEATURES
-        self.mask_in_channels = cfg.MODEL.SOLOV2.MASK_IN_CHANNELS
-        self.mask_channels = cfg.MODEL.SOLOV2.MASK_CHANNELS
+        self.num_masks = cfg.MODEL.POLO.NUM_MASKS
+        self.mask_in_features = cfg.MODEL.POLO.MASK_IN_FEATURES
+        self.mask_in_channels = cfg.MODEL.POLO.MASK_IN_CHANNELS
+        self.mask_channels = cfg.MODEL.POLO.MASK_CHANNELS
         self.num_levels = len(input_shape)
         assert self.num_levels == len(self.mask_in_features), \
             print("Input shape should match the features.")
         # fmt: on
-        norm = None if cfg.MODEL.SOLOV2.NORM == "none" else cfg.MODEL.SOLOV2.NORM
+        norm = None if cfg.MODEL.POLO.NORM == "none" else cfg.MODEL.POLO.NORM
 
         self.convs_all_levels = nn.ModuleList()
         for i in range(self.num_levels):
