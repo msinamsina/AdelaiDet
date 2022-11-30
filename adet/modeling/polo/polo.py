@@ -6,6 +6,7 @@ from typing import List
 import torch
 import torch.nn.functional as F
 from torch import nn
+import torchvision
 
 from detectron2.layers import ShapeSpec, batched_nms, cat, paste_masks_in_image
 from detectron2.modeling.anchor_generator import DefaultAnchorGenerator
@@ -15,6 +16,7 @@ from detectron2.modeling.meta_arch.build import META_ARCH_REGISTRY
 from detectron2.structures import Boxes, ImageList, Instances
 from detectron2.utils.logger import log_first_n
 from fvcore.nn import sigmoid_focal_loss_jit
+import matplotlib.pyplot as plt
 
 from .utils import imrescale, center_of_mass, point_nms, mask_nms, matrix_nms
 from .loss import dice_loss, FocalLoss
@@ -102,15 +104,16 @@ class POLO(nn.Module):
                 Other information that's included in the original dicts, such as:
                     "height", "width" (int): the output resolution of the model, used in inference.
                         See :meth:`postprocess` for details.
-         Returns:
+        Returns:
             losses (dict[str: Tensor]): mapping from a named loss to a tensor
                 storing the loss. Used during training only.
         """
         images = self.preprocess_image(batched_inputs)
-        import matplotlib.pyplot as plt
-        plt.figure(num='This is the title')
-        plt.imshow(self.denorm(images[0]).permute(1, 2, 0).cpu().numpy())
-        # plt.pause(0.1)
+        # import matplotlib.pyplot as plt
+        # plt.figure(num='This is the title')
+        # plt.imshow(self.denorm(images[0]).permute(1, 2, 0).cpu().numpy())
+        # plt.pause(5)
+        # print(batched_inputs[0]['image'].shape)
         if "instances" in batched_inputs[0]:
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
         elif "targets" in batched_inputs[0]:
@@ -122,7 +125,7 @@ class POLO(nn.Module):
             gt_instances = None
 
         features = self.backbone(images.tensor)
-
+        # print('images', images.tensor.shape)
         # ins branch
         ins_features = [features[f] for f in self.instance_in_features]
         ins_features = self.split_feats(ins_features)
@@ -132,6 +135,9 @@ class POLO(nn.Module):
         mask_features = [features[f] for f in self.mask_in_features]
         mask_pred = self.mask_head(mask_features)
 
+        # print('cate_pred', [x.shape for x in cate_pred])
+        # print('kernel_pred', [x.shape for x in kernel_pred])
+        # print('mask_pred', [x.shape for x in mask_pred])
         if self.training:
             """
             get_ground_truth.
@@ -197,6 +203,7 @@ class POLO(nn.Module):
             # plt.imshow(final_gt_masks_raw[i].cpu().numpy())
             # print(i, final_gt_bboxes_raw[i])
         # plt.show()
+        final_gt_masks_raw[final_gt_masks_raw >= self.num_classes] = 0
         return final_gt_bboxes_raw, final_gt_labels_raw, final_gt_masks_raw
 
     def get_ground_truth_single(self, img_idx, gt_instances, mask_feat_size):
@@ -208,8 +215,15 @@ class POLO(nn.Module):
         device = gt_labels_raw[0].device
 
         gt_bboxes_raw, gt_labels_raw, gt_masks_raw = self.combine_part_of_parent_ins(gt_bboxes_raw, gt_labels_raw, gt_masks_raw, gt_parent_id_raw, device)
-
-
+        # import matplotlib.pyplot as plt
+        # plt.figure(num='This is the title2')
+        # plt.imshow(gt_masks_raw[0].cpu().numpy())
+        # print(gt_masks_raw[0].unique())
+        # plt.show()
+        # print('gt_bboxes_raw', gt_bboxes_raw.shape)
+        # print('gt_labels_raw', gt_labels_raw.shape)
+        # print('gt_labels_raw', gt_labels_raw)
+        # print('gt_masks_raw', gt_masks_raw.shape)
         # ins
         gt_areas = torch.sqrt((gt_bboxes_raw[:, 2] - gt_bboxes_raw[:, 0]) * (
                 gt_bboxes_raw[:, 3] - gt_bboxes_raw[:, 1]))
@@ -334,6 +348,7 @@ class POLO(nn.Module):
                                  for ins_labels_level_img in ins_labels_level], 0)
                       for ins_labels_level in zip(*ins_label_list)]
 
+        # print('kernel_preds.shape', [kernel_preds[i].shape for i in range(len(kernel_preds))])
         kernel_preds = [[kernel_preds_level_img.view(kernel_preds_level_img.shape[0], -1)[:, grid_orders_level_img]
                          for kernel_preds_level_img, grid_orders_level_img in
                          zip(kernel_preds_level, grid_orders_level)]
@@ -343,16 +358,30 @@ class POLO(nn.Module):
         for b_kernel_pred in kernel_preds:
             b_mask_pred = []
             for idx, kernel_pred in enumerate(b_kernel_pred):
-
+                # print('kernel_pred.shape', kernel_pred.shape)
+                # print('idx', idx)
                 if kernel_pred.size()[-1] == 0:
                     continue
                 cur_ins_pred = ins_pred[idx, ...]
+                # print('cur_ins_pred.shape', cur_ins_pred.shape)
+
+                # ff = torchvision.utils.make_grid(cur_ins_pred.unsqueeze(1)[:16], nrow=4, padding=20, normalize=True, range=None, scale_each=False, pad_value=255)
+                # plt.imshow(ff.permute(1, 2, 0).cpu().detach().numpy())
+                # plt.savefig(str(f'feature_maps{idx}.jpg'), bbox_inches='tight')
+                # plt.pause(0.1)
+                # print('kernel_pred.shape', kernel_pred.shape)
+                # print('cur_ins_pred.shape', cur_ins_pred.shape)
+
                 H, W = cur_ins_pred.shape[-2:]
                 N, I = kernel_pred.shape
+                cur_ins_pred = torch.reshape(cur_ins_pred, (-1, self.num_classes, H, W))
                 cur_ins_pred = cur_ins_pred.unsqueeze(0)
-                kernel_pred = kernel_pred.permute(1, 0).view(I, -1, 1, 1)
+                kernel_pred = kernel_pred.permute(1, 0).view(I, -1, 1, 1, 1)
                 # kernel_pred = torch.cat([kernel_pred for _ in range(19)], dim=1)
-                cur_ins_pred = F.conv2d(cur_ins_pred, kernel_pred, stride=1).view(-1, H, W)
+                # print('--kernel_pred.shape', kernel_pred.shape)
+                # print('--cur_ins_pred.shape', cur_ins_pred.shape)
+                cur_ins_pred = F.conv3d(cur_ins_pred, kernel_pred, stride=1).view(-1, self.num_classes, H, W)
+                # print('++cur_ins_pred.shape', cur_ins_pred.shape)
                 b_mask_pred.append(cur_ins_pred)
             if len(b_mask_pred) == 0:
                 b_mask_pred = None
@@ -365,12 +394,20 @@ class POLO(nn.Module):
             if input is None:
                 continue
             input = torch.sigmoid(input)
-            print(torch.unique(target))
-            print(target.shape)
-            print(input.shape)
-            loss_ins.append(dice_loss(input, target))
+            # ff = torchvision.utils.make_grid(target.unsqueeze(1), nrow=4, padding=20, normalize=False,
+            #                                  range=(0,30), scale_each=True, pad_value=255)
 
-        loss_ins_mean = torch.cat(loss_ins).mean()
+            # print(torch.unique(target))
+            # print(target.shape)
+            # print(input.shape)
+            # plt.imshow(ff.permute(1,2,0).cpu().numpy())
+            # plt.show()
+            # loss_ins.append(dice_loss(input, target))
+            loss_ins.append(F.cross_entropy(input, target.to(torch.long)))
+        # print('loss_ins', loss_ins)
+
+        # loss_ins_mean = torch.cat(loss_ins).mean()
+        loss_ins_mean = torch.stack(loss_ins).mean()
         loss_ins = loss_ins_mean * self.ins_loss_weight
 #######################################################################
         ins_ind_labels = [
@@ -391,13 +428,14 @@ class POLO(nn.Module):
         flatten_cate_labels = torch.cat(cate_labels)
 
         cate_preds = [
-            cate_pred.permute(0, 2, 3, 1).reshape(-1, self.num_classes)
+            cate_pred.permute(0, 2, 3, 1).reshape(-1, 1)  #  self.num_classes)
             for cate_pred in cate_preds
         ]
         flatten_cate_preds = torch.cat(cate_preds)
 
         # prepare one_hot
-        pos_inds = torch.nonzero(flatten_cate_labels != self.num_classes).squeeze(1)
+        # pos_inds = torch.nonzero(flatten_cate_labels != self.num_classes).squeeze(1)
+        pos_inds = torch.nonzero(flatten_cate_labels != 1).squeeze(1)
 
         flatten_cate_labels_oh = torch.zeros_like(flatten_cate_preds)
         flatten_cate_labels_oh[pos_inds, flatten_cate_labels[pos_inds]] = 1
@@ -638,7 +676,7 @@ class POLOInsHead(nn.Module):
                             nn.Sequential(*tower))
 
         self.cate_pred = nn.Conv2d(
-            self.instance_channels, self.num_classes,
+            self.instance_channels, 1,  # self.num_classes,
             kernel_size=3, stride=1, padding=1
         )
         self.kernel_pred = nn.Conv2d(
@@ -707,6 +745,7 @@ class POLOMaskHead(nn.Module):
         """
         super().__init__()
         # fmt: off
+        self.num_classes = cfg.MODEL.POLO.NUM_CLASSES
         self.mask_on = cfg.MODEL.MASK_ON
         self.num_masks = cfg.MODEL.POLO.NUM_MASKS
         self.mask_in_features = cfg.MODEL.POLO.MASK_IN_FEATURES
@@ -771,10 +810,10 @@ class POLOMaskHead(nn.Module):
 
         self.conv_pred = nn.Sequential(
             nn.Conv2d(
-                self.mask_channels, self.num_masks,
+                self.mask_channels, self.num_masks*self.num_classes,
                 kernel_size=1, stride=1,
                 padding=0, bias=norm is None),
-            nn.GroupNorm(32, self.num_masks),
+            # nn.GroupNorm(32, self.num_masks*self.num_classes),
             nn.ReLU(inplace=True)
         )
 
