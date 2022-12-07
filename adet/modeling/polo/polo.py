@@ -393,7 +393,7 @@ class POLO(nn.Module):
         for input, target in zip(ins_pred_list, ins_labels):
             if input is None:
                 continue
-            input = torch.sigmoid(input)
+            # input = torch.sigmoid(input)
             # ff = torchvision.utils.make_grid(target.unsqueeze(1), nrow=4, padding=20, normalize=False,
             #                                  range=(0,30), scale_each=True, pad_value=255)
 
