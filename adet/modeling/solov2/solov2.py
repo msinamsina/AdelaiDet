@@ -89,6 +89,7 @@ class SOLOv2(nn.Module):
         pixel_std = torch.Tensor(cfg.MODEL.PIXEL_STD).to(self.device).view(3, 1, 1)
         self.normalizer = lambda x: (x - pixel_mean) / pixel_std
         self.to(self.device)
+        self.denorm = lambda x: ((x * pixel_std) + pixel_mean).to(torch.uint8)
 
     def forward(self, batched_inputs):
         """
@@ -106,6 +107,10 @@ class SOLOv2(nn.Module):
                 storing the loss. Used during training only.
         """
         images = self.preprocess_image(batched_inputs)
+        import matplotlib.pyplot as plt
+        plt.figure(num='This is the title')
+        plt.imshow(self.denorm(images[0]).permute(1, 2, 0).cpu().numpy())
+        # plt.pause(0.1)
         if "instances" in batched_inputs[0]:
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
         elif "targets" in batched_inputs[0]:
@@ -167,12 +172,43 @@ class SOLOv2(nn.Module):
             ins_ind_label_list.append(cur_ins_ind_label_list)
             grid_order_list.append(cur_grid_order_list)
         return ins_label_list, cate_label_list, ins_ind_label_list, grid_order_list
-        
+
+    def combine_part_of_parent_ins(self, gt_bboxes_raw, gt_labels_raw, gt_masks_raw, gt_parent_id_raw, device):
+        ch = len(torch.unique(gt_parent_id_raw))
+        w, h = gt_masks_raw.shape[1:]
+        final_gt_masks_raw = torch.zeros((ch, w, h), dtype=torch.int, device=device)
+        final_gt_labels_raw = torch.ones((ch,), dtype=torch.int, device=device)
+        final_gt_bboxes_raw = torch.empty((ch, 4), dtype=torch.float32, device=device)
+        for i in range(ch):
+            flg = 1
+            for idx, p_id in enumerate(gt_parent_id_raw):
+                if p_id == i:
+                    final_gt_masks_raw[i] = torch.add(final_gt_masks_raw[i], gt_masks_raw[idx] * gt_labels_raw[idx])
+                    if flg:
+                        final_gt_bboxes_raw[i] = gt_bboxes_raw[idx]
+                        flg = 0
+                    else:
+                        final_gt_bboxes_raw[i, 0] = min(final_gt_bboxes_raw[i, 0], gt_bboxes_raw[idx, 0])
+                        final_gt_bboxes_raw[i, 1] = min(final_gt_bboxes_raw[i, 1], gt_bboxes_raw[idx, 1])
+                        final_gt_bboxes_raw[i, 2] = max(final_gt_bboxes_raw[i, 2], gt_bboxes_raw[idx, 2])
+                        final_gt_bboxes_raw[i, 3] = max(final_gt_bboxes_raw[i, 3], gt_bboxes_raw[idx, 3])
+            # import matplotlib.pyplot as plt
+            # plt.figure(num=f'This is the title p id:{i}')
+            # plt.imshow(final_gt_masks_raw[i].cpu().numpy())
+            # print(i, final_gt_bboxes_raw[i])
+        # plt.show()
+        return final_gt_bboxes_raw, final_gt_labels_raw, final_gt_masks_raw
+
     def get_ground_truth_single(self, img_idx, gt_instances, mask_feat_size):
+        # print(mask_feat_size)
         gt_bboxes_raw = gt_instances[img_idx].gt_boxes.tensor
         gt_labels_raw = gt_instances[img_idx].gt_classes
         gt_masks_raw = gt_instances[img_idx].gt_masks.tensor
+        gt_parent_id_raw = gt_instances[img_idx].parent_id
         device = gt_labels_raw[0].device
+
+        gt_bboxes_raw, gt_labels_raw, gt_masks_raw = self.combine_part_of_parent_ins(gt_bboxes_raw, gt_labels_raw, gt_masks_raw, gt_parent_id_raw, device)
+
 
         # ins
         gt_areas = torch.sqrt((gt_bboxes_raw[:, 2] - gt_bboxes_raw[:, 0]) * (
@@ -191,7 +227,7 @@ class SOLOv2(nn.Module):
             ins_label = []
             grid_order = []
             cate_label = torch.zeros([num_grid, num_grid], dtype=torch.int64, device=device)
-            cate_label = torch.fill_(cate_label, self.num_classes)
+            cate_label = torch.fill_(cate_label, 1) # only one class: person #self.num_classes
             ins_ind_label = torch.zeros([num_grid ** 2], dtype=torch.bool, device=device)
 
             if num_ins == 0:
@@ -209,15 +245,27 @@ class SOLOv2(nn.Module):
             half_hs = 0.5 * (gt_bboxes[:, 3] - gt_bboxes[:, 1]) * self.sigma
 
             # mass center
-            center_ws, center_hs = center_of_mass(gt_masks)
+            gt_masks_for_center_of_mass = torch.zeros(gt_masks.shape, dtype=torch.bool, device=device)
+            gt_masks_for_center_of_mass[gt_masks > 0] = True
+            center_ws, center_hs = center_of_mass(gt_masks_for_center_of_mass)
             valid_mask_flags = gt_masks.sum(dim=-1).sum(dim=-1) > 0
 
             output_stride = 4
             gt_masks = gt_masks.permute(1, 2, 0).to(dtype=torch.uint8).cpu().numpy()
             gt_masks = imrescale(gt_masks, scale=1./output_stride)
+
             if len(gt_masks.shape) == 2:
                 gt_masks = gt_masks[..., None]
             gt_masks = torch.from_numpy(gt_masks).to(dtype=torch.uint8, device=device).permute(2, 0, 1)
+            # ###############################################################################################
+            # import matplotlib.pylab as plt
+            # xx = torch.zeros(gt_masks[0].shape, dtype=torch.int, device=device)
+            # for idx, mask in enumerate(gt_masks):
+            #     xx = torch.add(xx, mask)
+            # plt.figure(num='This is the title{}'.format((lower_bound, upper_bound)))
+            # plt.imshow(xx.cpu().numpy())
+            #
+            # ##############################################################################################
             for seg_mask, gt_label, half_h, half_w, center_h, center_w, valid_mask_flag in zip(gt_masks, gt_labels, half_hs, half_ws, center_hs, center_ws, valid_mask_flags):
                 if not valid_mask_flag:
                     continue
@@ -255,6 +303,28 @@ class SOLOv2(nn.Module):
             cate_label_list.append(cate_label)
             ins_ind_label_list.append(ins_ind_label)
             grid_order_list.append(grid_order)
+            # print(ins_label.shape)
+            # print(cate_label.shape)
+            # print(ins_ind_label.shape)
+            # print(len(grid_order), grid_order)
+
+        # plt.show()
+
+        # for i in range(5):
+        #     gt_masks = ins_label_list[i]
+        #     # raise ''
+        #     # gt_labels = ins_label_list[i]
+        #     ###############################################################################################
+        #     import matplotlib.pylab as plt
+        #     xx = torch.zeros(gt_masks.shape[1:], dtype=torch.int, device=device)
+        #     for idx, mask in enumerate(gt_masks):
+        #         # print(torch.unique(mask))
+        #         xx = torch.add(xx, mask)
+        #     plt.figure(num='This is the title x {}'.format(self.scale_ranges[i]))
+        #     plt.imshow(xx.cpu().numpy())
+        #
+        #     ##############################################################################################
+        # plt.show()
         return ins_label_list, cate_label_list, ins_ind_label_list, grid_order_list
 
     def loss(self, cate_preds, kernel_preds, ins_pred, targets):
@@ -282,6 +352,7 @@ class SOLOv2(nn.Module):
                 N, I = kernel_pred.shape
                 cur_ins_pred = cur_ins_pred.unsqueeze(0)
                 kernel_pred = kernel_pred.permute(1, 0).view(I, -1, 1, 1)
+                kernel_pred = torch.cat([kernel_pred for _ in range(19)], dim=1)
                 cur_ins_pred = F.conv2d(cur_ins_pred, kernel_pred, stride=1).view(-1, H, W)
                 b_mask_pred.append(cur_ins_pred)
             if len(b_mask_pred) == 0:
@@ -289,6 +360,19 @@ class SOLOv2(nn.Module):
             else:
                 b_mask_pred = torch.cat(b_mask_pred, 0)
             ins_pred_list.append(b_mask_pred)
+        # dice loss
+        loss_ins = []
+        for input, target in zip(ins_pred_list, ins_labels):
+            if input is None:
+                continue
+            input = torch.sigmoid(input)
+            #print(torch.unique(target))
+            #print(target.shape)
+            #print(input.shape)
+            loss_ins.append(dice_loss(input, target))
+
+        loss_ins_mean = torch.cat(loss_ins).mean()
+        loss_ins = loss_ins_mean * self.ins_loss_weight
 
         ins_ind_labels = [
             torch.cat([ins_ind_labels_level_img.flatten()
@@ -298,17 +382,6 @@ class SOLOv2(nn.Module):
         flatten_ins_ind_labels = torch.cat(ins_ind_labels)
 
         num_ins = flatten_ins_ind_labels.sum()
-
-        # dice loss
-        loss_ins = []
-        for input, target in zip(ins_pred_list, ins_labels):
-            if input is None:
-                continue
-            input = torch.sigmoid(input)
-            loss_ins.append(dice_loss(input, target))
-
-        loss_ins_mean = torch.cat(loss_ins).mean()
-        loss_ins = loss_ins_mean * self.ins_loss_weight
 
         # cate
         cate_labels = [
@@ -499,7 +572,7 @@ class SOLOv2(nn.Module):
         #    mask = seg_masks[i].squeeze()
         #    ys, xs = torch.where(mask)
         #    pred_boxes[i] = torch.tensor([xs.min(), ys.min(), xs.max(), ys.max()]).float()
-        results.pred_boxes = Boxes(pred_boxes)        
+        results.pred_boxes = Boxes(pred_boxes)
 
         return results
 
@@ -699,10 +772,10 @@ class SOLOv2MaskHead(nn.Module):
 
         self.conv_pred = nn.Sequential(
             nn.Conv2d(
-                self.mask_channels, self.num_masks,
+                self.mask_channels, self.num_masks*19,
                 kernel_size=1, stride=1,
                 padding=0, bias=norm is None),
-            nn.GroupNorm(32, self.num_masks),
+            nn.GroupNorm(32, self.num_masks*19),
             nn.ReLU(inplace=True)
         )
 

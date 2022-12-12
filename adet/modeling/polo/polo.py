@@ -151,6 +151,10 @@ class POLO(nn.Module):
             # point nms.
             cate_pred = [point_nms(cate_p.sigmoid(), kernel=2).permute(0, 2, 3, 1)
                          for cate_p in cate_pred]
+            # print('cate_pred', [x.shape for x in cate_pred])
+            plt.figure(num='This is the title2')
+            # plt.imshow(cate_pred[0].view(40,40).cpu().numpy())
+            # plt.show()
             # do inference for results.
             results = self.inference(cate_pred, kernel_pred, mask_pred, images.image_sizes, batched_inputs)
             return results
@@ -468,7 +472,7 @@ class POLO(nn.Module):
             ori_size = (height, width)
 
             # prediction.
-            pred_cate = [pred_cates[i][img_idx].view(-1, self.num_classes).detach()
+            pred_cate = [pred_cates[i][img_idx].view(-1, 1).detach() #self.num_classes).detach()
                           for i in range(num_ins_levels)]
             pred_kernel = [pred_kernels[i][img_idx].permute(1, 2, 0).view(-1, self.num_kernels).detach()
                             for i in range(num_ins_levels)]
@@ -476,6 +480,9 @@ class POLO(nn.Module):
 
             pred_cate = torch.cat(pred_cate, dim=0)
             pred_kernel = torch.cat(pred_kernel, dim=0)
+            # print('pred_cate.shape', pred_cate.shape)
+            # print('pred_kernel.shape', pred_kernel.shape)
+            # print('pred_mask.shape', pred_mask.shape)
 
             # inference for single image.
             result = self.inference_single_image(pred_cate, pred_kernel, pred_mask,
@@ -494,8 +501,11 @@ class POLO(nn.Module):
 
         # process.
         inds = (cate_preds > self.score_threshold)
+        # print("inds", inds.shape)
         cate_scores = cate_preds[inds]
+        # print("cate_scores", cate_scores.shape)
         if len(cate_scores) == 0:
+            print('no cate_scores')
             results = Instances(ori_size)
             results.scores = torch.tensor([])
             results.pred_classes = torch.tensor([])
@@ -506,7 +516,9 @@ class POLO(nn.Module):
         # cate_labels & kernel_preds
         inds = inds.nonzero()
         cate_labels = inds[:, 1]
+        # print("cate_labels", cate_labels.shape)
         kernel_preds = kernel_preds[inds[:, 0]]
+        # print("kernel_preds", kernel_preds.shape)
 
         # trans vector.
         size_trans = cate_labels.new_tensor(self.num_grids).pow(2).cumsum(0)
@@ -519,13 +531,33 @@ class POLO(nn.Module):
         strides = strides[inds[:, 0]]
 
         # mask encoding.
+        H, W = seg_preds.shape[-2:]
         N, I = kernel_preds.shape
-        kernel_preds = kernel_preds.view(N, I, 1, 1)
-        seg_preds = F.conv2d(seg_preds, kernel_preds, stride=1).squeeze(0).sigmoid()
-
+        kernel_preds = kernel_preds.view(N, I, 1, 1, 1)
+        seg_preds = torch.reshape(seg_preds, (-1, self.num_classes, H, W))
+        seg_preds = seg_preds.unsqueeze(0)
+        seg_preds = F.conv3d(seg_preds, kernel_preds, stride=1).view(-1, self.num_classes, H, W)
+        # print('--seg_preds.shape', seg_preds.shape)
         # mask.
-        seg_masks = seg_preds > self.mask_threshold
-        sum_masks = seg_masks.sum((1, 2)).float()
+        seg_masks = torch.argmax(seg_preds, dim=1)
+        seg_masks_list = []
+        keep_inds = []
+        for i, m in enumerate(seg_masks):
+            if m.unique().shape[0] > 2:
+                seg_masks_list.append(m)
+                keep_inds.append(i)
+        seg_masks = torch.stack(seg_masks_list, dim=0)
+        keep_inds = torch.tensor(keep_inds)
+        cate_scores = cate_scores[keep_inds]
+        cate_labels = cate_labels[keep_inds]
+        strides = strides[keep_inds]
+
+        # print('--seg_masks.shape', seg_masks.shape)
+
+        # seg_masks = seg_preds > self.mask_threshold
+        binary_masks = seg_masks.clone()
+        binary_masks[binary_masks > 0] = 1
+        sum_masks = binary_masks.sum((1, 2)).float()
 
         # filter.
         keep = sum_masks > strides
@@ -538,37 +570,42 @@ class POLO(nn.Module):
             return results
 
         seg_masks = seg_masks[keep, ...]
-        seg_preds = seg_preds[keep, ...]
+        # seg_preds = seg_preds[keep, ...]
         sum_masks = sum_masks[keep]
         cate_scores = cate_scores[keep]
         cate_labels = cate_labels[keep]
 
         # maskness.
-        seg_scores = (seg_preds * seg_masks.float()).sum((1, 2)) / sum_masks
-        cate_scores *= seg_scores
+        # seg_scores = (seg_preds * seg_masks.float()).sum((1, 2)) / sum_masks
+        # cate_scores *= seg_scores
 
         # sort and keep top nms_pre
         sort_inds = torch.argsort(cate_scores, descending=True)
         if len(sort_inds) > self.max_before_nms:
             sort_inds = sort_inds[:self.max_before_nms]
         seg_masks = seg_masks[sort_inds, :, :]
-        seg_preds = seg_preds[sort_inds, :, :]
+        # seg_preds = seg_preds[sort_inds, :, :]
+        binary_masks = binary_masks[sort_inds, :, :]
         sum_masks = sum_masks[sort_inds]
         cate_scores = cate_scores[sort_inds]
         cate_labels = cate_labels[sort_inds]
-
+        #
         if self.nms_type == "matrix":
             # matrix nms & filter.
-            cate_scores = matrix_nms(cate_labels, seg_masks, sum_masks, cate_scores,
+            # print('--cate_scores.shape', cate_scores.shape)
+            # print('--binary_masks.shape', binary_masks.shape)
+            # print('--seg_masks.shape', seg_masks.shape)
+            cate_scores = matrix_nms(cate_labels, binary_masks, sum_masks, cate_scores,
                                           sigma=self.nms_sigma, kernel=self.nms_kernel)
+            # print('--cate_scores.shape', cate_scores.shape)
             keep = cate_scores >= self.update_threshold
         elif self.nms_type == "mask":
             # original mask nms.
-            keep = mask_nms(cate_labels, seg_masks, sum_masks, cate_scores,
+            keep = mask_nms(cate_labels, binary_masks, sum_masks, cate_scores,
                                  nms_thr=self.mask_threshold)
         else:
             raise NotImplementedError
-
+        print('--keep.sum()', keep.sum())
         if keep.sum() == 0:
             results = Instances(ori_size)
             results.scores = torch.tensor([])
@@ -577,27 +614,43 @@ class POLO(nn.Module):
             results.pred_boxes = Boxes(torch.tensor([]))
             return results
 
-        seg_preds = seg_preds[keep, :, :]
-        cate_scores = cate_scores[keep]
-        cate_labels = cate_labels[keep]
+        # seg_preds = seg_preds[keep, :, :]
+        # binary_masks = binary_masks[keep, :, :]
+        # cate_scores = cate_scores[keep]
+        # cate_labels = cate_labels[keep]
 
         # sort and keep top_k
         sort_inds = torch.argsort(cate_scores, descending=True)
         if len(sort_inds) > self.max_per_img:
             sort_inds = sort_inds[:self.max_per_img]
-        seg_preds = seg_preds[sort_inds, :, :]
+        # seg_preds = seg_preds[sort_inds, :, :]
+        binary_masks = binary_masks[sort_inds, :, :]
+        seg_masks = seg_masks[sort_inds, :, :]
         cate_scores = cate_scores[sort_inds]
         cate_labels = cate_labels[sort_inds]
 
         # reshape to original size.
-        seg_preds = F.interpolate(seg_preds.unsqueeze(0),
-                                  size=upsampled_size_out,
-                                  mode='bilinear')[:, :, :h, :w]
-        seg_masks = F.interpolate(seg_preds,
-                                  size=ori_size,
-                                  mode='bilinear').squeeze(0)
-        seg_masks = seg_masks > self.mask_threshold
+        # seg_preds = F.interpolate(seg_preds.unsqueeze(0),
+        #                           size=upsampled_size_out,
+        #                           mode='bilinear')[:, :, :h, :w]
 
+        # binary_masks = F.interpolate(binary_masks.unsqueeze(0),
+        #                           size=upsampled_size_out,
+        #                           mode='bilinear')[:, :, :h, :w]
+
+        # seg_masks = F.interpolate(seg_preds,
+        #                size=ori_size,
+        #                           mode='bilinear').squeeze(0)
+        # seg_masks = seg_masks > self.mask_threshold
+
+        seg_masks = F.interpolate(seg_masks.unsqueeze(0).float(),
+                                  size=ori_size,
+                                  mode='nearest').squeeze(0)
+
+        # print('seg_masks.shape', seg_masks.shape)
+        #
+        # print('cate_scores.shape', cate_scores.shape)
+        # print('cate_labels.shape', cate_labels.shape)
         results = Instances(ori_size)
         results.pred_classes = cate_labels
         results.scores = cate_scores
@@ -611,6 +664,10 @@ class POLO(nn.Module):
         #    pred_boxes[i] = torch.tensor([xs.min(), ys.min(), xs.max(), ys.max()]).float()
         results.pred_boxes = Boxes(pred_boxes)
 
+        # for i in range(seg_masks.size(0)):
+        #     mask = seg_masks[i].squeeze()
+        #     plt.imshow(mask.cpu().numpy())
+        #     plt.pause(1)
         return results
 
 
