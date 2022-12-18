@@ -153,8 +153,8 @@ class POLO(nn.Module):
                          for cate_p in cate_pred]
             # print('cate_pred', [x.shape for x in cate_pred])
             plt.figure(num='This is the title2')
-            # plt.imshow(cate_pred[0].view(40,40).cpu().numpy())
-            # plt.show()
+            plt.imshow(cate_pred[0].view(40,40).cpu().numpy())
+            plt.show()
             # do inference for results.
             results = self.inference(cate_pred, kernel_pred, mask_pred, images.image_sizes, batched_inputs)
             return results
@@ -245,7 +245,7 @@ class POLO(nn.Module):
             ins_label = []
             grid_order = []
             cate_label = torch.zeros([num_grid, num_grid], dtype=torch.int64, device=device)
-            cate_label = torch.fill_(cate_label, 1) # only one class: person #self.num_classes
+            cate_label = torch.fill_(cate_label, 0) # only one class: person #self.num_classes
             ins_ind_label = torch.zeros([num_grid ** 2], dtype=torch.bool, device=device)
 
             if num_ins == 0:
@@ -301,8 +301,9 @@ class POLO(nn.Module):
                 down = min(down_box, coord_h+1)
                 left = max(coord_w-1, left_box)
                 right = min(right_box, coord_w+1)
-
+                # print(gt_label)
                 cate_label[top:(down+1), left:(right+1)] = gt_label
+                # print(cate_label.unique())
                 for i in range(top, down+1):
                     for j in range(left, right+1):
                         label = int(i * num_grid + j)
@@ -343,6 +344,11 @@ class POLO(nn.Module):
         #
         #     ##############################################################################################
         # plt.show()
+        # for cate_label in cate_label_list:
+        #     plt.figure()
+        #     plt.imshow(cate_label.cpu().numpy())
+        # plt.show()
+
         return ins_label_list, cate_label_list, ins_ind_label_list, grid_order_list
 
     def loss(self, cate_preds, kernel_preds, ins_pred, targets):
@@ -429,25 +435,35 @@ class POLO(nn.Module):
                        for cate_labels_level_img in cate_labels_level])
             for cate_labels_level in zip(*cate_label_list)
         ]
+        # print('cate_labels', [cate_labels[i].unique() for i in range(len(cate_labels))])
         flatten_cate_labels = torch.cat(cate_labels)
+        # print(flatten_cate_labels.unique(), 'flatten_cate_labels.unique()')
 
         cate_preds = [
             cate_pred.permute(0, 2, 3, 1).reshape(-1, 1)  #  self.num_classes)
             for cate_pred in cate_preds
         ]
         flatten_cate_preds = torch.cat(cate_preds)
-
+        # print(flatten_cate_preds.shape, 'flatten_cate_preds.shape')
+        # print(flatten_cate_labels.shape, 'flatten_cate_labels.shape')
+        # print(flatten_cate_labels.unique(), 'flatten_cate_labels.unique()')
         # prepare one_hot
-        # pos_inds = torch.nonzero(flatten_cate_labels != self.num_classes).squeeze(1)
-        pos_inds = torch.nonzero(flatten_cate_labels != 1).squeeze(1)
+        # pos_inds = torch.nonzero(flatten_cate_label != self.num_classes).squeeze(1)
+        # pos_inds = torch.nonzero(flatten_cate_labels != 1).squeeze(1)
+        #
+        # flatten_cate_labels_oh = torch.zeros_like(flatten_cate_preds)
+        # flatten_cate_labels_oh[pos_inds, flatten_cate_labels[pos_inds]] = 1
+        # loss_cate = self.focal_loss_weight * sigmoid_focal_loss_jit(flatten_cate_preds, flatten_cate_labels_oh,
+        #                             gamma=self.focal_loss_gamma,
+        #                             alpha=self.focal_loss_alpha,
+        #                             reduction="sum") / (num_ins + 1)
 
-        flatten_cate_labels_oh = torch.zeros_like(flatten_cate_preds)
-        flatten_cate_labels_oh[pos_inds, flatten_cate_labels[pos_inds]] = 1
+        # print('flatten_cate_labels.shape', flatten_cate_labels.type())
+        loss_cate = self.focal_loss_weight * \
+                    torch.nn.functional.binary_cross_entropy_with_logits(
+                        flatten_cate_preds.squeeze(), flatten_cate_labels.to(torch.float32), reduction='sum') / (num_ins + 1)
+                        # , flatten_cate_labels.unsqueeze(1), reduction='sum') / (num_ins + 1)
 
-        loss_cate = self.focal_loss_weight * sigmoid_focal_loss_jit(flatten_cate_preds, flatten_cate_labels_oh,
-                                    gamma=self.focal_loss_gamma,
-                                    alpha=self.focal_loss_alpha,
-                                    reduction="sum") / (num_ins + 1)
         return {'loss_ins': loss_ins,
                 'loss_cate': loss_cate}
 
@@ -498,12 +514,19 @@ class POLO(nn.Module):
         f_h, f_w = seg_preds.size()[-2:]
         ratio = math.ceil(h/f_h)
         upsampled_size_out = (int(f_h*ratio), int(f_w*ratio))
-
-        # process.
-        inds = (cate_preds > self.score_threshold)
-        # print("inds", inds.shape)
+        print(cate_preds.unique(), 'cate_preds.unique()')
+        # cate_preds = 1- cate_preds
+        # sort and keep top_k
+        sorted, sort_inds = torch.sort(cate_preds, descending=True, dim=0)
+        # if len(sort_inds) > self.max_per_img*5:
+        sort_inds = sort_inds[0:1000]
+        cate_preds = cate_preds[sort_inds]
+        kernel_preds = kernel_preds[sort_inds[:, 0]]
+        # cate_preds[cate_preds > self.score_threshold] = 1
+        inds = cate_preds > self.score_threshold
+        print(cate_preds.max(), cate_preds.min(), 'cate_preds.max(), cate_preds.min()')
         cate_scores = cate_preds[inds]
-        # print("cate_scores", cate_scores.shape)
+
         if len(cate_scores) == 0:
             print('no cate_scores')
             results = Instances(ori_size)
@@ -558,7 +581,7 @@ class POLO(nn.Module):
         binary_masks = seg_masks.clone()
         binary_masks[binary_masks > 0] = 1
         sum_masks = binary_masks.sum((1, 2)).float()
-
+        # cate_scores = cate_scores * sum_masks / (h * w)
         # filter.
         keep = sum_masks > strides
         if keep.sum() == 0:
@@ -595,9 +618,14 @@ class POLO(nn.Module):
             # print('--cate_scores.shape', cate_scores.shape)
             # print('--binary_masks.shape', binary_masks.shape)
             # print('--seg_masks.shape', seg_masks.shape)
-            cate_scores = matrix_nms(cate_labels, binary_masks, sum_masks, cate_scores,
-                                          sigma=self.nms_sigma, kernel=self.nms_kernel)
+            for i in range(10):
+                cate_scores = matrix_nms(cate_labels, binary_masks, sum_masks, cate_scores,
+                                              sigma=self.nms_sigma, kernel=self.nms_kernel)
+                cate_scores[cate_scores.isnan()] = 0
+
             # print('--cate_scores.shape', cate_scores.shape)
+            print(cate_scores.unique())
+
             keep = cate_scores >= self.update_threshold
         elif self.nms_type == "mask":
             # original mask nms.
@@ -615,9 +643,10 @@ class POLO(nn.Module):
             return results
 
         # seg_preds = seg_preds[keep, :, :]
-        # binary_masks = binary_masks[keep, :, :]
-        # cate_scores = cate_scores[keep]
-        # cate_labels = cate_labels[keep]
+        binary_masks = binary_masks[keep, :, :]
+        seg_masks = seg_masks[keep, :, :]
+        cate_scores = cate_scores[keep]
+        cate_labels = cate_labels[keep]
 
         # sort and keep top_k
         sort_inds = torch.argsort(cate_scores, descending=True)
@@ -664,10 +693,11 @@ class POLO(nn.Module):
         #    pred_boxes[i] = torch.tensor([xs.min(), ys.min(), xs.max(), ys.max()]).float()
         results.pred_boxes = Boxes(pred_boxes)
 
-        # for i in range(seg_masks.size(0)):
-        #     mask = seg_masks[i].squeeze()
-        #     plt.imshow(mask.cpu().numpy())
-        #     plt.pause(1)
+        for i in range(seg_masks.size(0)):
+            mask = seg_masks[i].squeeze()
+            plt.figure()
+            plt.imshow(mask.cpu().numpy())
+        plt.show()
         return results
 
 
@@ -792,6 +822,7 @@ class POLOInsHead(nn.Module):
             # cate
             cate_feat = self.cate_tower(cate_feat)
             cate_pred.append(self.cate_pred(cate_feat))
+            # cate_pred.append(torch.nn.functional.sigmoid(self.cate_pred(cate_feat)))
         return cate_pred, kernel_pred
 
 
