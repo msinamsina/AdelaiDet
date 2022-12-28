@@ -79,8 +79,8 @@ stuff_classes = ['background', 'Hat', 'Hair', 'Glove', 'Sunglasses', 'UpperCloth
                  'Scarf', 'Skirt', 'Face', 'Left-arm', 'Right-arm', 'Left-leg', 'Right-leg', 'Left-shoe', 'Right-shoe']
 MetadataCatalog.get('CIHP_train').set(thing_classes=thing_classes, stuff_classes=stuff_classes, evaluator_type="coco")
 MetadataCatalog.get('CIHP_val').set(thing_classes=thing_classes, stuff_classes=stuff_classes, evaluator_type="coco")
-MetadataCatalog.get('CIHP_train_v2').set(thing_classes=thing_classes[1:], stuff_classes=stuff_classes, evaluator_type="coco")
-MetadataCatalog.get('CIHP_val_v2').set(thing_classes=thing_classes[1:], stuff_classes=stuff_classes, evaluator_type="coco")
+MetadataCatalog.get('CIHP_train_v2').set(thing_classes=thing_classes[1:], stuff_classes=stuff_classes, evaluator_type="parsing")
+MetadataCatalog.get('CIHP_val_v2').set(thing_classes=thing_classes[1:], stuff_classes=stuff_classes, evaluator_type="parsing")
 MetadataCatalog.get('CIHP_train_person').set(thing_classes=['Person'], evaluator_type="coco")
 MetadataCatalog.get('CIHP_val_person').set(thing_classes=['Person'], evaluator_type="coco")
 MetadataCatalog.get('CIHP_train_person').set(thing_classes=['Person'], evaluator_type="coco")

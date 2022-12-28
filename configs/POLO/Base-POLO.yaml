@@ -8,8 +8,8 @@ MODEL:
   FPN:
     IN_FEATURES: ["res2", "res3", "res4", "res5"]
   POLO:
-    SCORE_THR: 0.1
-    UPDATE_THR: 0.001
+    SCORE_THR: 0.5
+    UPDATE_THR: 0.5
 DATASETS:
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)

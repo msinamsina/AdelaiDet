@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 
 from .utils import imrescale, center_of_mass, point_nms, mask_nms, matrix_nms
 from .loss import dice_loss, FocalLoss
+from .lovasz_losses import lovasz_hinge, lovasz_softmax
 
 __all__ = ["POLO"]
 
@@ -152,9 +153,9 @@ class POLO(nn.Module):
             cate_pred = [point_nms(cate_p.sigmoid(), kernel=2).permute(0, 2, 3, 1)
                          for cate_p in cate_pred]
             # print('cate_pred', [x.shape for x in cate_pred])
-            plt.figure(num='This is the title2')
-            plt.imshow(cate_pred[0].view(40,40).cpu().numpy())
-            plt.show()
+            # plt.figure(num='This is the title2')
+            # plt.imshow(cate_pred[0].view(40,40).cpu().numpy())
+            # plt.show()
             # do inference for results.
             results = self.inference(cate_pred, kernel_pred, mask_pred, images.image_sizes, batched_inputs)
             return results
@@ -400,6 +401,7 @@ class POLO(nn.Module):
             ins_pred_list.append(b_mask_pred)
         # dice loss
         loss_ins = []
+        lovasz_loss_ins = []
         for input, target in zip(ins_pred_list, ins_labels):
             if input is None:
                 continue
@@ -413,13 +415,28 @@ class POLO(nn.Module):
             # plt.imshow(ff.permute(1,2,0).cpu().numpy())
             # plt.show()
             # loss_ins.append(dice_loss(input, target))
-            loss_ins.append(F.cross_entropy(input, target.to(torch.long)))
+            # print('input.shape', input.shape)
+            # print('target.shape', target.shape)
+            loss_ins.append(F.cross_entropy(input, target.to(torch.long), reduction='sum')/(input.shape[0]*input.shape[2]*input.shape[3]))
+                                            # weight=torch.tensor([10.0, 100, 10, 100, 100, 10, 10, 10, 100, 10, 100, 100, 100, 100, 10, 100, 100, 100, 100, 100]).to(self.device)/100))
+
+            # print("befor", input.max(), input.min())
+            input = F.softmax(input, dim=1)
+            # print("after", input.max(), input.min())
+            # tmp = input.sum(dim=1)
+            # print("sum", tmp.unique())
+            lovasz_loss_ins.append(lovasz_softmax(input, target, ignore=255, per_image=False, classes='all'))
+
+
+
         # print('loss_ins', loss_ins)
 
         # loss_ins_mean = torch.cat(loss_ins).mean()
         loss_ins_mean = torch.stack(loss_ins).mean()
-        loss_ins = loss_ins_mean * self.ins_loss_weight
-#######################################################################
+        lovasz_loss_ins_mean = torch.stack(lovasz_loss_ins).mean()
+        loss_seg_cross = loss_ins_mean * self.ins_loss_weight
+        loss_seg_lovasz = lovasz_loss_ins_mean * self.ins_loss_weight
+        #######################################################################
         ins_ind_labels = [
             torch.cat([ins_ind_labels_level_img.flatten()
                        for ins_ind_labels_level_img in ins_ind_labels_level])
@@ -458,14 +475,14 @@ class POLO(nn.Module):
         #                             alpha=self.focal_loss_alpha,
         #                             reduction="sum") / (num_ins + 1)
 
-        # print('flatten_cate_labels.shape', flatten_cate_labels.type())
-        loss_cate = self.focal_loss_weight * \
+        loss_object = self.focal_loss_weight * \
                     torch.nn.functional.binary_cross_entropy_with_logits(
                         flatten_cate_preds.squeeze(), flatten_cate_labels.to(torch.float32), reduction='sum') / (num_ins + 1)
-                        # , flatten_cate_labels.unsqueeze(1), reduction='sum') / (num_ins + 1)
 
-        return {'loss_ins': loss_ins,
-                'loss_cate': loss_cate}
+        return {
+            'loss_seg_cross': loss_seg_cross,
+                'loss_seg_lovasz': loss_seg_lovasz,
+                'loss_object': loss_object}
 
     @staticmethod
     def split_feats(feats):
@@ -514,7 +531,7 @@ class POLO(nn.Module):
         f_h, f_w = seg_preds.size()[-2:]
         ratio = math.ceil(h/f_h)
         upsampled_size_out = (int(f_h*ratio), int(f_w*ratio))
-        print(cate_preds.unique(), 'cate_preds.unique()')
+        # print(cate_preds.unique(), 'cate_preds.unique()')
         # cate_preds = 1- cate_preds
         # sort and keep top_k
         sorted, sort_inds = torch.sort(cate_preds, descending=True, dim=0)
@@ -524,7 +541,7 @@ class POLO(nn.Module):
         kernel_preds = kernel_preds[sort_inds[:, 0]]
         # cate_preds[cate_preds > self.score_threshold] = 1
         inds = cate_preds > self.score_threshold
-        print(cate_preds.max(), cate_preds.min(), 'cate_preds.max(), cate_preds.min()')
+        # print(cate_preds.max(), cate_preds.min(), 'cate_preds.max(), cate_preds.min()')
         cate_scores = cate_preds[inds]
 
         if len(cate_scores) == 0:
@@ -569,6 +586,16 @@ class POLO(nn.Module):
             if m.unique().shape[0] > 2:
                 seg_masks_list.append(m)
                 keep_inds.append(i)
+
+        if len(seg_masks_list) == 0:
+            results = Instances(ori_size)
+            results.scores = torch.tensor([])
+            results.pred_classes = torch.tensor([])
+            results.pred_masks = torch.tensor([])
+            results.pred_boxes = Boxes(torch.tensor([]))
+            return results
+
+
         seg_masks = torch.stack(seg_masks_list, dim=0)
         keep_inds = torch.tensor(keep_inds)
         cate_scores = cate_scores[keep_inds]
@@ -624,7 +651,7 @@ class POLO(nn.Module):
                 cate_scores[cate_scores.isnan()] = 0
 
             # print('--cate_scores.shape', cate_scores.shape)
-            print(cate_scores.unique())
+            # print(cate_scores.unique())
 
             keep = cate_scores >= self.update_threshold
         elif self.nms_type == "mask":
@@ -633,7 +660,7 @@ class POLO(nn.Module):
                                  nms_thr=self.mask_threshold)
         else:
             raise NotImplementedError
-        print('--keep.sum()', keep.sum())
+        # print('--keep.sum()', keep.sum())
         if keep.sum() == 0:
             results = Instances(ori_size)
             results.scores = torch.tensor([])
@@ -693,11 +720,11 @@ class POLO(nn.Module):
         #    pred_boxes[i] = torch.tensor([xs.min(), ys.min(), xs.max(), ys.max()]).float()
         results.pred_boxes = Boxes(pred_boxes)
 
-        for i in range(seg_masks.size(0)):
-            mask = seg_masks[i].squeeze()
-            plt.figure()
-            plt.imshow(mask.cpu().numpy())
-        plt.show()
+        # for i in range(seg_masks.size(0)):
+        #     mask = seg_masks[i].squeeze()
+        #     plt.figure()
+        #     plt.imshow(mask.cpu().numpy())
+        # plt.show()
         return results
 
 

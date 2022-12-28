@@ -5,11 +5,19 @@ import pickle
 import cv2
 import numpy as np
 from torch.utils.data import Dataset
+from scipy.io import loadmat
+
 
 class CIHPDataset(Dataset):
 
     def __init__(self, root, train=False):
         self.train = train
+
+        # Loading the Colormap
+        colormap = loadmat(os.path.join(root, 'CIHP/human_colormap.mat')
+        )["colormap"]
+        colormap = colormap * 100
+        self.colormap = colormap.astype(np.uint8)
 
         if train:
             anno = os.path.join(root, 'CIHP/Training/train_id.txt')
@@ -75,7 +83,7 @@ class CIHPDataset(Dataset):
                 "bbox": list(xy),
                 "bbox_mode": BoxMode.XYXY_ABS,
                 "segmentation": true_polygons_list,
-                "category_id": (inst % 20) - 1,
+                "category_id": (inst % 20),
                 "parent_id": (inst // 20),
             }
             if obj['category_id'] < 0:

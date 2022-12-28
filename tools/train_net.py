@@ -22,7 +22,7 @@ import torch
 from torch.nn.parallel import DistributedDataParallel
 
 import detectron2.utils.comm as comm
-from detectron2.data import MetadataCatalog, build_detection_train_loader
+from detectron2.data import MetadataCatalog, build_detection_train_loader, build_detection_test_loader
 from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, hooks, launch
 from detectron2.utils.events import EventStorage
 from detectron2.evaluation import (
@@ -41,7 +41,8 @@ from adet.data.dataset_mapper import DatasetMapperWithBasis
 from adet.data.fcpose_dataset_mapper import FCPoseDatasetMapper
 from adet.config import get_cfg
 from adet.checkpoint import AdetCheckpointer
-from adet.evaluation import TextEvaluator
+from adet.evaluation import TextEvaluator, ParsingEval
+from detectron2.solver.build import get_default_optimizer_params, maybe_add_gradient_clipping
 
 
 class Trainer(DefaultTrainer):
@@ -49,6 +50,27 @@ class Trainer(DefaultTrainer):
     This is the same Trainer except that we rewrite the
     `build_train_loader`/`resume_or_load` method.
     """
+    @classmethod
+    def build_optimizer(cls, cfg, model):
+        """
+        Build an optimizer from config.
+        """
+        params = get_default_optimizer_params(
+            model,
+            base_lr=cfg.SOLVER.BASE_LR,
+            weight_decay_norm=cfg.SOLVER.WEIGHT_DECAY_NORM,
+            bias_lr_factor=cfg.SOLVER.BIAS_LR_FACTOR,
+            weight_decay_bias=cfg.SOLVER.WEIGHT_DECAY_BIAS,
+        )
+        return maybe_add_gradient_clipping(cfg, torch.optim.Adam)(
+            params,
+            lr=cfg.SOLVER.BASE_LR,
+            # momentum=cfg.SOLVER.MOMENTUM,
+            # nesterov=cfg.SOLVER.NESTEROV,
+            weight_decay=cfg.SOLVER.WEIGHT_DECAY,
+        )
+
+
     def build_hooks(self):
         """
         Replace `DetectionCheckpointer` with `AdetCheckpointer`.
@@ -120,6 +142,21 @@ class Trainer(DefaultTrainer):
         return build_detection_train_loader(cfg, mapper=mapper)
 
     @classmethod
+    def build_test_loader(cls, cfg, dataset_name):
+        """
+        Returns:
+            iterable
+
+        It calls :func:`detectron2.data.build_detection_test_loader` with a customized
+        DatasetMapper, which adds categorical labels as a semantic mask.
+        """
+        if cfg.MODEL.FCPOSE_ON:
+            mapper = FCPoseDatasetMapper(cfg, False)
+        else:
+            mapper = DatasetMapperWithBasis(cfg, False)
+        return build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+
+    @classmethod
     def build_evaluator(cls, cfg, dataset_name, output_folder=None):
         """
         Create evaluator(s) for a given dataset.
@@ -145,6 +182,8 @@ class Trainer(DefaultTrainer):
             evaluator_list.append(COCOEvaluator(dataset_name, cfg, True, output_folder))
         if evaluator_type == "coco_panoptic_seg":
             evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
+        if evaluator_type == "parsing":
+            evaluator_list.append(ParsingEval(dataset_name, cfg, True, output_folder))
         if evaluator_type == "pascal_voc":
             return PascalVOCDetectionEvaluator(dataset_name)
         if evaluator_type == "lvis":
