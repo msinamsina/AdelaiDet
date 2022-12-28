@@ -124,23 +124,23 @@ class ParsingEval(DatasetEvaluator):
                 for j in range(seg_gt.size(0)):
                     b = seg_gt[j].clone().to('cpu')
                     b[b >= 20] = 0
-                    a[a == 15] = 14
-                    b[b == 15] = 14
-                    a[a == 17] = 16
-                    b[b == 17] = 16
-                    a[a == 19] = 18
-                    b[b == 19] = 18
-                    a[a == 6] = 5
-                    b[b == 6] = 5
-                    a[a == 7] = 5
-                    b[b == 7] = 5
-                    a[a == 19] = 18
-                    b[b == 19] = 18
+                    # a[a == 15] = 14
+                    # b[b == 15] = 14
+                    # a[a == 17] = 16
+                    # b[b == 17] = 16
+                    # a[a == 19] = 18
+                    # b[b == 19] = 18
+                    # a[a == 6] = 5
+                    # b[b == 6] = 5
+                    # a[a == 7] = 5
+                    # b[b == 7] = 5
+                    # a[a == 19] = 18
+                    # b[b == 19] = 18
                     # print(a.unique())
                     # print(b.unique())
                     seg_iou = cal_one_mean_iou(a.numpy().astype(np.uint8), b.numpy().astype(np.uint8), 20)
                     # print(seg_iou)
-                    seg_iou = seg_iou[b.unique().cpu().numpy().astype(np.uint8)]
+                    # seg_iou = seg_iou[b.unique().cpu().numpy().astype(np.uint8)]
                     # seg_iou[seg_iou == 0] = np.nan
                     mean_seg_iou = np.nanmean(seg_iou[0:])
                     # print(mean_seg_iou)
