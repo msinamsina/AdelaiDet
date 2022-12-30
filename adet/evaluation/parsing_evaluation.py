@@ -161,7 +161,6 @@ class ParsingEval(DatasetEvaluator):
 
             # plot_mask(seg_gt, self.dataset_dicts.colormap, 20, 2)
             # plot_mask(seg_pred, self.dataset_dicts.colormap, 20, 2)
-            # plot_mask(seg_pred, 2)
             # plt.show()
         self.evaluate()
 

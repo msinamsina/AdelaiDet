@@ -342,7 +342,7 @@ class POLO(nn.Module):
             loss_ins.append(F.cross_entropy(input, target.to(torch.long), reduction='sum', weight=self.seg_cross_loss_classes_weight)/(input.shape[0]*input.shape[2]*input.shape[3]))
             # weight=torch.tensor([10.0, 100, 10, 100, 100, 10, 10, 10, 100, 10, 100, 100, 100, 100, 10, 100, 100, 100, 100, 100]).to(self.device)/100))
             input = F.softmax(input, dim=1)
-            lovasz_loss_ins.append(lovasz_softmax(input, target, ignore=0, per_image=self.seg_lovasz_loss_perimg, classes='all'))
+            lovasz_loss_ins.append(lovasz_softmax(input, target, ignore=255, per_image=self.seg_lovasz_loss_perimg, classes='all'))
 
         # loss_ins_mean = torch.cat(loss_ins).mean()
         loss_ins_mean = torch.stack(loss_ins).mean()
@@ -798,7 +798,7 @@ class POLOMaskHead(nn.Module):
                 self.mask_channels, self.num_masks*self.num_classes,
                 kernel_size=1, stride=1,
                 padding=0, bias=norm is None),
-            nn.GroupNorm(32, self.num_masks*self.num_classes),
+            # nn.GroupNorm(32, self.num_masks*self.num_classes),
             nn.ReLU(inplace=True)
         )
 
