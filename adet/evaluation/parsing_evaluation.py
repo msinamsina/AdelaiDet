@@ -1,3 +1,5 @@
+import os.path
+
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.evaluation import COCOEvaluator, inference_on_dataset, DatasetEvaluator
 import matplotlib.pyplot as plt
@@ -26,14 +28,15 @@ def decode_segmentation_masks(mask, colormap, n_classes):
     rgb = np.stack([r, g, b], axis=2)
     return rgb
 
-def plot_mask(mask, colormap, classes = 20, row=1):
+def plot_mask(mask, colormap, classes = 20, row=1, mask_name=None):
     col = ((mask.size(0)) // row) + 2
     fig, ax = plt.subplots(col, row, figsize=(10, 10))
     for i in range(mask.size(0)):
         prediction_colormap = decode_segmentation_masks(mask[i].squeeze().cpu().numpy(), colormap, classes)
 
         ax[i // row, i % row].imshow(prediction_colormap)
-
+    if mask_name is not None:
+        plt.savefig(mask_name)
 
 def voc_ap(rec, prec, use_07_metric=False):
     """ ap = voc_ap(rec, prec, [use_07_metric])
@@ -124,23 +127,23 @@ class ParsingEval(DatasetEvaluator):
                 for j in range(seg_gt.size(0)):
                     b = seg_gt[j].clone().to('cpu')
                     b[b >= 20] = 0
-                    # a[a == 15] = 14
-                    # b[b == 15] = 14
-                    # a[a == 17] = 16
-                    # b[b == 17] = 16
-                    # a[a == 19] = 18
-                    # b[b == 19] = 18
-                    # a[a == 6] = 5
-                    # b[b == 6] = 5
-                    # a[a == 7] = 5
-                    # b[b == 7] = 5
+                    a[a == 15] = 14
+                    b[b == 15] = 14
+                    a[a == 17] = 16
+                    b[b == 17] = 16
+                    a[a == 19] = 18
+                    b[b == 19] = 18
+                    a[a == 6] = 5
+                    b[b == 6] = 5
+                    a[a == 7] = 5
+                    b[b == 7] = 5
                     # a[a == 19] = 18
                     # b[b == 19] = 18
                     # print(a.unique())
                     # print(b.unique())
                     seg_iou = cal_one_mean_iou(a.numpy().astype(np.uint8), b.numpy().astype(np.uint8), 20)
                     # print(seg_iou)
-                    # seg_iou = seg_iou[b.unique().cpu().numpy().astype(np.uint8)]
+                    seg_iou = seg_iou[b.unique().cpu().numpy().astype(np.uint8)]
                     # seg_iou[seg_iou == 0] = np.nan
                     mean_seg_iou = np.nanmean(seg_iou[0:])
                     # print(mean_seg_iou)
@@ -159,10 +162,10 @@ class ParsingEval(DatasetEvaluator):
                         self.tp[j].append(0)
                         self.fp[j].append(1)
 
-            # plot_mask(seg_gt, self.dataset_dicts.colormap, 20, 2)
-            # plot_mask(seg_pred, self.dataset_dicts.colormap, 20, 2)
+            plot_mask(seg_gt, self.dataset_dicts.colormap, 20, 2, os.path.join(self._output_dir, str(input['image_id']) + "_gt.png"))
+            plot_mask(seg_pred, self.dataset_dicts.colormap, 20, 2, os.path.join(self._output_dir, str(input['image_id']) + "_pred.png"))
             # plt.show()
-        self.evaluate()
+        # self.evaluate()
 
     def mix_parts_of_instance(self, instances, size):
         person_ids = set()
