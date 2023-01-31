@@ -7,6 +7,7 @@ import torch
 
 import numpy as np
 from PIL import Image, ImageDraw
+import time
 
 
 def poly_to_mask(polygon, width, height):
@@ -15,6 +16,7 @@ def poly_to_mask(polygon, width, height):
         ImageDraw.Draw(img).polygon(poly, outline=1, fill=1)
     mask = np.array(img)
     return mask
+
 
 def decode_segmentation_masks(mask, colormap, n_classes):
     r = np.zeros_like(mask).astype(np.uint8)
@@ -28,7 +30,8 @@ def decode_segmentation_masks(mask, colormap, n_classes):
     rgb = np.stack([r, g, b], axis=2)
     return rgb
 
-def plot_mask(mask, colormap, classes = 20, row=1, mask_name=None):
+
+def plot_mask(mask, colormap, classes=20, row=1, mask_name=None):
     col = ((mask.size(0)) // row) + 2
     fig, ax = plt.subplots(col, row, figsize=(10, 10))
     for i in range(mask.size(0)):
@@ -37,6 +40,7 @@ def plot_mask(mask, colormap, classes = 20, row=1, mask_name=None):
         ax[i // row, i % row].imshow(prediction_colormap)
     if mask_name is not None:
         plt.savefig(mask_name)
+
 
 def voc_ap(rec, prec, use_07_metric=False):
     """ ap = voc_ap(rec, prec, [use_07_metric])
@@ -97,7 +101,11 @@ class ParsingEval(DatasetEvaluator):
         self.dataset_dicts = DatasetCatalog.get(dataset_name)
         self.metadata = MetadataCatalog.get(dataset_name)
         self.ovthresh_seg = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-
+        # if not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir)
+        except OSError:
+            pass
     def reset(self):
         self.tp = {}
         self.fp = {}
@@ -105,8 +113,13 @@ class ParsingEval(DatasetEvaluator):
             self.tp[i] = []
             self.fp[i] = []
         self.npos = 0
+        self.total_time = 0
+        self.delta_time = time.time()
+        self.num_images = 0
 
     def process(self, inputs, outputs):
+        self.num_images += len(inputs)
+        self.total_time += (time.time() - self.delta_time)
         for input, output in zip(inputs, outputs):
             # self.npos += len(self.dataset_dicts[input['image_id']]['annotations'])
             if len(output["instances"]) == 0:
@@ -116,6 +129,7 @@ class ParsingEval(DatasetEvaluator):
             w, h = output["instances"].pred_masks.size(1), output["instances"].pred_masks.size(2)
             seg_gt = self.mix_parts_of_instance(self.dataset_dicts[input['image_id']]['annotations'], (w, h))
             self.npos += seg_gt.size(0)
+            # print(seg_gt.shape)
             seg_pred = output["instances"].pred_masks
             # seg_pred = seg_gt.clone()
             list_mious = []
@@ -126,24 +140,29 @@ class ParsingEval(DatasetEvaluator):
                 a = seg_pred[i].clone().to('cpu')
                 for j in range(seg_gt.size(0)):
                     b = seg_gt[j].clone().to('cpu')
-                    b[b >= 20] = 0
-                    a[a == 15] = 14
-                    b[b == 15] = 14
-                    a[a == 17] = 16
-                    b[b == 17] = 16
-                    a[a == 19] = 18
-                    b[b == 19] = 18
-                    a[a == 6] = 5
-                    b[b == 6] = 5
-                    a[a == 7] = 5
-                    b[b == 7] = 5
+                    b[b >= 7] = 0
+                    # a[a == 15] = 14
+                    # b[b == 15] = 14
+                    # a[a == 17] = 16
+                    # b[b == 17] = 16
                     # a[a == 19] = 18
                     # b[b == 19] = 18
+                    # a[a == 6] = 5
+                    # b[b == 6] = 5
+                    # a[a == 7] = 5
+                    # b[b == 7] = 5
+                    # a[a == 10] = 5
+                    # b[b == 10] = 5
+                    # a[a == 12] = 5
+                    # b[b == 12] = 5
+                    # a[a > 0] = 1
+                    # b[b > 0] = 1
+
                     # print(a.unique())
                     # print(b.unique())
-                    seg_iou = cal_one_mean_iou(a.numpy().astype(np.uint8), b.numpy().astype(np.uint8), 20)
+                    seg_iou = cal_one_mean_iou(a.numpy().astype(np.uint8), b.numpy().astype(np.uint8), 7)
                     # print(seg_iou)
-                    seg_iou = seg_iou[b.unique().cpu().numpy().astype(np.uint8)]
+                    # seg_iou = seg_iou[b.unique().cpu().numpy().astype(np.uint8)]
                     # seg_iou[seg_iou == 0] = np.nan
                     mean_seg_iou = np.nanmean(seg_iou[0:])
                     # print(mean_seg_iou)
@@ -152,20 +171,31 @@ class ParsingEval(DatasetEvaluator):
                         max_iou_id = j
 
                 list_mious.append({"id": max_iou_id, "iou": max_iou})
-            # print(list_mious)
-            for i in list_mious:
-                for j in self.ovthresh_seg:
-                    if i["iou"] > j:
-                        self.tp[j].append(1)
-                        self.fp[j].append(0)
+
+            list_mious = sorted(list_mious, key=lambda x: x["iou"], reverse=True)
+            print([f"{x['id']}:{x['iou']:.3f}" for x in list_mious])
+            for j in self.ovthresh_seg:
+                id_list = []
+                for i in list_mious:
+                    if i['id'] not in id_list:
+                        if i["iou"] >= j:
+                            id_list.append(i['id'])
+                            self.tp[j].append(1)
+                            self.fp[j].append(0)
+                        else:
+                            self.tp[j].append(0)
+                            self.fp[j].append(1)
                     else:
+                        # pass
                         self.tp[j].append(0)
                         self.fp[j].append(1)
 
-            plot_mask(seg_gt, self.dataset_dicts.colormap, 20, 2, os.path.join(self._output_dir, str(input['image_id']) + "_gt.png"))
-            plot_mask(seg_pred, self.dataset_dicts.colormap, 20, 2, os.path.join(self._output_dir, str(input['image_id']) + "_pred.png"))
+            # plot_mask(seg_gt, self.dataset_dicts.colormap, 20, 2, os.path.join(self._output_dir, str(input['image_id']) + "_gt.png"))
+            # plot_mask(seg_pred, self.dataset_dicts.colormap, 20, 2, os.path.join(self._output_dir, str(input['image_id']) + "_pred.png"))
             # plt.show()
         # self.evaluate()
+        self.delta_time = time.time()
+        # return self.evaluate()
 
     def mix_parts_of_instance(self, instances, size):
         person_ids = set()
@@ -174,7 +204,7 @@ class ParsingEval(DatasetEvaluator):
 
         h, w = size
         seg_mask = torch.zeros((len(person_ids), h, w))
-
+        # print(person_ids)
         for i in person_ids:
             for j in instances:
                 if j['parent_id'] == i:
@@ -183,7 +213,6 @@ class ParsingEval(DatasetEvaluator):
                     seg_mask[i] = torch.add(seg_mask[i], mask * (j['category_id'] + 0))
 
         return seg_mask
-
 
     def evaluate(self):
         result = {}
@@ -194,10 +223,15 @@ class ParsingEval(DatasetEvaluator):
             fp = np.cumsum(fp)
             rec = tp / self.npos
             prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps)
+
             ap = voc_ap(rec, prec)
-            print(f"APp@{i}: ", ap)
+            print(f"APp@{i}: {ap:.3f}, {self.npos}, {tp[-1]}, {fp[-1]}")
             result[f"APp@{i}"] = ap
 
         result["APpvol"] = sum(result.values()) / len(result)
-        print(f"APpvol: ", result["APpvol"])
+        result["total_time"] = self.total_time
+        result["fps"] = self.num_images / self.total_time
+        print(f"APpvol: {result['APpvol']:.3f}")
+        print(f"total_time: {result['total_time']:.2f}")
+        print(f"fps: {result['fps']:.2f}")
         return result

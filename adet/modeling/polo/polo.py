@@ -15,12 +15,12 @@ from detectron2.modeling.box_regression import Box2BoxTransform
 from detectron2.modeling.meta_arch.build import META_ARCH_REGISTRY
 from detectron2.structures import Boxes, ImageList, Instances
 from detectron2.utils.logger import log_first_n
-from fvcore.nn import sigmoid_focal_loss_jit
+from fvcore.nn import sigmoid_focal_loss
 import matplotlib.pyplot as plt
 
 from .utils import imrescale, center_of_mass, point_nms, mask_nms, matrix_nms
 from .loss import dice_loss, FocalLoss
-from .lovasz_losses import lovasz_softmax
+from .lovasz_losses import LovaszSoftmax
 
 __all__ = ["POLO"]
 
@@ -86,6 +86,7 @@ class POLO(nn.Module):
         # self.focal_loss_alpha = cfg.MODEL.POLO.LOSS.FOCAL_ALPHA
         # self.focal_loss_gamma = cfg.MODEL.POLO.LOSS.FOCAL_GAMMA
         # self.focal_loss_weight = cfg.MODEL.POLO.LOSS.FOCAL_WEIGHT
+        # self.seg_focal_loss_weight = cfg.MODEL.POLO.LOSS.SEG_FOCAL_WEIGHT
         self.obj_loss_weight = cfg.MODEL.POLO.LOSS.OBJ_WEIGHT
         self.seg_cross_loss_weight = cfg.MODEL.POLO.LOSS.SEGCROSS_WEIGHT
         self.seg_cross_loss_classes_weight = cfg.MODEL.POLO.LOSS.SEGCROSS_CLASSES_WEIGHT
@@ -334,21 +335,41 @@ class POLO(nn.Module):
         # dice loss
         loss_ins = []
         lovasz_loss_ins = []
+        lovosz_softmax = LovaszSoftmax(ignore_index=0)
+        # focal_loss_ins = []
         for input, target in zip(ins_pred_list, ins_labels):
             if input is None:
                 continue
+
+                 # F.cross_entropy(input, target.to(torch.long), reduction='mean',ignore_index=0)
+            loss_ins.append(F.cross_entropy(input, target.to(torch.long), reduction='mean', weight=self.seg_cross_loss_classes_weight))
+            # loss_ins.append(F.cross_entropy(input, target.to(torch.long), reduction='mean', weight=self.seg_cross_loss_classes_weight))
+            # lovasz_loss_ins.append(lovosz_softmax(input, target.to(torch.long)))
+            lovasz_loss_ins.append(F.cross_entropy(input, target.to(torch.long), reduction='mean',ignore_index=0))
             # input = torch.sigmoid(input)
             # loss_ins.append(dice_loss(input, target))
-            loss_ins.append(F.cross_entropy(input, target.to(torch.long), reduction='sum', weight=self.seg_cross_loss_classes_weight)/(input.shape[0]*input.shape[2]*input.shape[3]))
+            # target img to one-hot
+            # target = F.one_hot(target.long(), self.num_classes).permute(0, 3, 1, 2).float()
+            # flatten input and target
+            # input = input.permute(0, 2, 3, 1).reshape(-1, self.num_classes)
+            # target = target.permute(0, 2, 3, 1).reshape(-1, self.num_classes)
+
+            # focal_loss_ins.append(sigmoid_focal_loss(input, target,
+            #                         gamma=2.0,
+            #                         alpha=0.25,
+            #                         reduction="mean"))
             # weight=torch.tensor([10.0, 100, 10, 100, 100, 10, 10, 10, 100, 10, 100, 100, 100, 100, 10, 100, 100, 100, 100, 100]).to(self.device)/100))
-            input = F.softmax(input, dim=1)
-            lovasz_loss_ins.append(lovasz_softmax(input, target, ignore=255, per_image=self.seg_lovasz_loss_perimg, classes='all'))
+            # input = F.softmax(input, dim=1)
+            # lovasz_loss_ins.append(lovasz_softmax(input, target, ignore=255, per_image=self.seg_lovasz_loss_perimg, classes='all'))
 
         # loss_ins_mean = torch.cat(loss_ins).mean()
         loss_ins_mean = torch.stack(loss_ins).mean()
+        # loss_focal_ins_mean = torch.stack(focal_loss_ins).mean()
         lovasz_loss_ins_mean = torch.stack(lovasz_loss_ins).mean()
         loss_seg_cross = loss_ins_mean * self.seg_cross_loss_weight
         loss_seg_lovasz = lovasz_loss_ins_mean * self.seg_lovasz_loss_weight
+        # loss_seg_focal = self.seg_focal_loss_weight * loss_focal_ins_mean
+
 
         ins_ind_labels = [
             torch.cat([ins_ind_labels_level_img.flatten()
@@ -389,7 +410,9 @@ class POLO(nn.Module):
 
         return {
                 'loss_seg_cross': loss_seg_cross,
-                'loss_seg_lovasz': loss_seg_lovasz,
+                # 'loss_seg_lovasz': loss_seg_lovasz,
+                'loss_seg_class': loss_seg_lovasz,
+                # 'loss_seg_focal': loss_seg_focal,
                 'loss_object': loss_object}
 
     @staticmethod
@@ -445,7 +468,7 @@ class POLO(nn.Module):
         cate_scores = cate_preds[inds]
 
         if len(cate_scores) == 0:
-            print('no cate_scores')
+            # print('no cate_scores')
             results = Instances(ori_size)
             results.scores = torch.tensor([])
             results.pred_classes = torch.tensor([])
@@ -474,6 +497,9 @@ class POLO(nn.Module):
         kernel_preds = kernel_preds.view(N, I, 1, 1, 1)
         seg_preds = torch.reshape(seg_preds, (-1, self.num_classes, H, W))
         seg_preds = seg_preds.unsqueeze(0)
+        # print('seg_preds', seg_preds.shape)
+        # print('kernel_preds', kernel_preds.shape)
+        # raise ''
         seg_preds = F.conv3d(seg_preds, kernel_preds, stride=1).view(-1, self.num_classes, H, W)
         # mask.
         seg_masks = torch.argmax(seg_preds, dim=1)
@@ -534,7 +560,7 @@ class POLO(nn.Module):
         #
         if self.nms_type == "matrix":
             # matrix nms & filter.
-            for i in range(10):
+            for i in range(2):
                 cate_scores = matrix_nms(cate_labels, binary_masks, sum_masks, cate_scores,
                                               sigma=self.nms_sigma, kernel=self.nms_kernel)
                 cate_scores[cate_scores.isnan()] = 0
@@ -797,9 +823,19 @@ class POLOMaskHead(nn.Module):
             nn.Conv2d(
                 self.mask_channels, self.num_masks*self.num_classes,
                 kernel_size=1, stride=1,
-                padding=0, bias=norm is None),
-            # nn.GroupNorm(32, self.num_masks*self.num_classes),
-            nn.ReLU(inplace=True)
+                padding=1, bias=norm is None),
+            # nn.GroupNorm(self.num_classes, self.num_masks*self.num_classes),
+            nn.ReLU(inplace=True),
+            # nn.Conv2d(
+            #     self.num_masks * 4, self.num_masks * self.num_classes,
+            #     kernel_size=3, stride=1,
+            #     padding=1, bias=norm is None),
+            # nn.ReLU(inplace=True),
+            # nn.Conv2d(
+            #     self.num_masks*4, self.num_masks*self.num_classes,
+            #     kernel_size=1, stride=1,
+            #     padding=0, bias=norm is None),
+            # nn.ReLU(inplace=True)
         )
 
         for modules in [self.convs_all_levels, self.conv_pred]:
