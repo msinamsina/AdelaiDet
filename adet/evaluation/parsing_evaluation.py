@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw
 import time
 
 
+
 def poly_to_mask(polygon, width, height):
     img = Image.new('L', (width, height), 0)
     for poly in polygon:
@@ -35,8 +36,11 @@ def plot_mask(mask, colormap, classes=20, row=1, mask_name=None):
     col = ((mask.size(0)) // row) + 2
     fig, ax = plt.subplots(col, row, figsize=(10, 10))
     for i in range(mask.size(0)):
-        prediction_colormap = decode_segmentation_masks(mask[i].squeeze().cpu().numpy(), colormap, classes)
-
+        mask[mask >= 7 ] = 0
+        prediction_colormap = decode_segmentation_masks(mask[i].squeeze().cpu().numpy(), colormap, 7)
+        #save the mask
+        if mask_name is not None:
+            Image.fromarray(prediction_colormap).save(mask_name+'_'+str(i)+'.png')
         ax[i // row, i % row].imshow(prediction_colormap)
     if mask_name is not None:
         plt.savefig(mask_name)
@@ -121,6 +125,10 @@ class ParsingEval(DatasetEvaluator):
         self.num_images += len(inputs)
         self.total_time += (time.time() - self.delta_time)
         for input, output in zip(inputs, outputs):
+            # save input image
+
+
+
             # self.npos += len(self.dataset_dicts[input['image_id']]['annotations'])
             if len(output["instances"]) == 0:
                 seg_gt = self.mix_parts_of_instance(self.dataset_dicts[input['image_id']]['annotations'], (100, 100))
@@ -164,7 +172,7 @@ class ParsingEval(DatasetEvaluator):
                     # print(seg_iou)
                     # seg_iou = seg_iou[b.unique().cpu().numpy().astype(np.uint8)]
                     # seg_iou[seg_iou == 0] = np.nan
-                    mean_seg_iou = np.nanmean(seg_iou[0:])
+                    mean_seg_iou = np.nanmean(seg_iou[1:])
                     # print(mean_seg_iou)
                     if mean_seg_iou > max_iou:
                         max_iou = mean_seg_iou
@@ -192,6 +200,9 @@ class ParsingEval(DatasetEvaluator):
 
             # plot_mask(seg_gt, self.dataset_dicts.colormap, 20, 2, os.path.join(self._output_dir, str(input['image_id']) + "_gt.png"))
             # plot_mask(seg_pred, self.dataset_dicts.colormap, 20, 2, os.path.join(self._output_dir, str(input['image_id']) + "_pred.png"))
+            # img = input["image"].permute(1, 2, 0).cpu().numpy()
+            # img = (img * 255).astype(np.uint8)
+            # Image.fromarray(img).save(os.path.join(self._output_dir, str(input['image_id']) + ".png"))
             # plt.show()
         # self.evaluate()
         self.delta_time = time.time()

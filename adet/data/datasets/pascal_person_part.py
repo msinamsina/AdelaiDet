@@ -14,9 +14,8 @@ class PPPDataset(Dataset):
         self.train = train
 
         # Loading the Colormap
-        colormap = loadmat(os.path.join(root, 'CIHP/human_colormap.mat')
-        )["colormap"]
-        colormap = colormap * 100
+        colormap = np.array([[0, 0, 0], [0, 0, 255], [0, 255, 0], [0, 255, 255], [255, 0, 0], [255, 0, 255], [255, 255, 0]])
+        #colormap = colormap * 100
         self.colormap = colormap.astype(np.uint8)
         self.root = os.path.join(root, 'VOCdevkit/VOC2010/')
         if train:
@@ -116,7 +115,7 @@ class PPPDataset(Dataset):
         return objs
 
     def __len__(self):
-        # return 1
+        # return 100
         return len(self.anno_ids)
 
     def get_dicts(self):

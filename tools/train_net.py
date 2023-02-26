@@ -41,7 +41,7 @@ from adet.data.dataset_mapper import DatasetMapperWithBasis
 from adet.data.fcpose_dataset_mapper import FCPoseDatasetMapper
 from adet.config import get_cfg
 from adet.checkpoint import AdetCheckpointer
-from adet.evaluation import TextEvaluator, ParsingEval
+from adet.evaluation import TextEvaluator, ParsingEval, MHPDatasetEvaluator
 from detectron2.solver.build import get_default_optimizer_params, maybe_add_gradient_clipping
 
 
@@ -183,7 +183,8 @@ class Trainer(DefaultTrainer):
         if evaluator_type == "coco_panoptic_seg":
             evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
         if evaluator_type == "parsing":
-            evaluator_list.append(ParsingEval(dataset_name, cfg, True, output_folder))
+            # evaluator_list.append(ParsingEval(dataset_name, cfg, True, output_folder))
+            evaluator_list.append(MHPDatasetEvaluator(dataset_name, cfg, True, output_folder))
         if evaluator_type == "pascal_voc":
             return PascalVOCDetectionEvaluator(dataset_name)
         if evaluator_type == "lvis":
